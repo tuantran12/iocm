@@ -1,0 +1,20 @@
+node_modules/
+.next/
+.env
+.env.local
+.env.production
+*.tsbuildinfo
+next-env.d.ts
+dist/
+coverage/
+uploads/
+.playwright/
+test-results/
+playwright-report/
+
+# Production
+backups/*.sql.gz
+certs/*.pem
+certs/*.key
+!certs/.gitkeep
+!backups/.gitkeep

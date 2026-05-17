@@ -1,0 +1,1144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String     @id @default(cuid())
+  email             String     @unique
+  name              String
+  phone             String?
+  avatarUrl         String?
+  passwordHash      String
+  twoFactor         Boolean    @default(false)
+  twoFactorSecret   String?
+  status            UserStatus @default(ACTIVE)
+  failedLogins      Int        @default(0)
+  lockedUntil       DateTime?
+  notificationPrefs Json?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  roles             UserRole[]
+  auditLogs         AuditLog[]
+  comments          DocumentComment[]
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum DocumentCluster {
+  CORE_FOUNDING
+  REGULATIONS
+  PERSONNEL
+  PARTNERSHIP
+  CONTRACTS
+  TECHNOLOGY
+  DATA
+  PILOT
+  FINANCE
+  SECURITY
+  REPORTING
+}
+
+enum DocumentStatus {
+  NOT_STARTED
+  DRAFTING
+  NEEDS_INFO
+  IN_REVIEW
+  PENDING_APPROVAL
+  APPROVED
+  SIGNED
+  SUBMITTED
+  SUPPLEMENT_REQUESTED
+  ACCEPTED
+  OFFICIAL_RECORD
+  AMENDED
+  SUPERSEDED
+  ARCHIVED
+  EXPIRED
+}
+
+enum Confidentiality {
+  PUBLIC
+  INTERNAL
+  RESTRICTED
+  CONFIDENTIAL
+  SECRET
+}
+
+enum LegalStatus {
+  ACTIVE
+  EXPIRING
+  EXPIRED
+  SUPERSEDED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Role {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  description String?
+  permissions Json
+  users       UserRole[]
+}
+
+model UserRole {
+  id     String  @id @default(cuid())
+  userId String
+  roleId String
+  scope  String?
+  user   User    @relation(fields: [userId], references: [id])
+  role   Role    @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId, scope])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String
+  targetType String
+  targetId   String
+  timestamp  DateTime @default(now())
+  ipAddress  String?
+  beforeVal  Json?
+  afterVal   Json?
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model DocumentItem {
+  id                String               @id @default(cuid())
+  code              String               @unique
+  name              String
+  type              String               @default("general")
+  cluster           DocumentCluster      @default(CORE_FOUNDING)
+  version           Int                  @default(1)
+  status            DocumentStatus       @default(NOT_STARTED)
+  ownerId           String?
+  reviewerId        String?
+  approverId        String?
+  confidentiality   Confidentiality      @default(INTERNAL)
+  priority          Priority             @default(MEDIUM)
+  deadline          DateTime?
+  effectiveDate     DateTime?
+  expiryDate        DateTime?
+  riskIfMissing     String?
+  completenessScore Float                @default(0)
+  fileUrl           String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  legalBases        DocumentLegalBasis[]
+  checks            CompletenessCheck[]
+  versions          DocumentVersion[]
+  comments          DocumentComment[]
+  files             DocumentFile[]
+}
+
+model DocumentVersion {
+  id         String       @id @default(cuid())
+  documentId String
+  version    Int
+  content    String?
+  fileUrl    String?
+  changedBy  String
+  changeNote String?
+  createdAt  DateTime     @default(now())
+  document   DocumentItem @relation(fields: [documentId], references: [id])
+}
+
+model DocumentComment {
+  id         String            @id @default(cuid())
+  documentId String
+  authorId   String
+  content    String
+  replyToId  String?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  document   DocumentItem      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  author     User              @relation(fields: [authorId], references: [id])
+  replyTo    DocumentComment?  @relation("CommentReplies", fields: [replyToId], references: [id])
+  replies    DocumentComment[] @relation("CommentReplies")
+}
+
+model LegalBasis {
+  id              String               @id @default(cuid())
+  documentNumber  String               @unique
+  title           String
+  issuingAuth     String
+  effectiveDate   DateTime
+  expiryDate      DateTime?
+  status          LegalStatus          @default(ACTIVE)
+  effectiveStatus String               @default("active")
+  basisType       String
+  scope           String
+  summary         String?
+  fullTextUrl     String?
+  lastVerified    DateTime?
+  verifiedBy      String?
+  documents       DocumentLegalBasis[]
+  verifications   LegalBasisVerification[]
+}
+
+model LegalBasisVerification {
+  id               String     @id @default(cuid())
+  legalBasisId     String
+  sourceType       String     // official_gov, vbpl, ministry, internal
+  sourceUrl        String
+  verifiedDate     DateTime
+  verifiedBy       String
+  verificationNote String?
+  confidence       String     // high, medium, low
+  legalBasis       LegalBasis @relation(fields: [legalBasisId], references: [id])
+}
+
+model DocumentLegalBasis {
+  id           String       @id @default(cuid())
+  documentId   String
+  legalBasisId String
+  document     DocumentItem @relation(fields: [documentId], references: [id])
+  legalBasis   LegalBasis   @relation(fields: [legalBasisId], references: [id])
+
+  @@unique([documentId, legalBasisId])
+}
+
+model CompletenessCheck {
+  id         String       @id @default(cuid())
+  documentId String
+  question   String
+  answer     String?
+  passed     Boolean      @default(false)
+  updatedBy  String?
+  updatedAt  DateTime     @updatedAt
+  document   DocumentItem @relation(fields: [documentId], references: [id])
+}
+
+model EnterpriseMember {
+  id                  String              @id @default(cuid())
+  legalNameVi         String
+  legalNameEn         String?
+  taxCode             String?             @unique
+  businessRegNumber   String?
+  legalRepresentative String
+  address             String
+  website             String?
+  industrySector      String?
+  technologyDomains   String[]
+  companySize         String?
+  contactName         String
+  contactEmail        String
+  contactPhone        String
+  membershipTierId    String
+  membershipStatus    MembershipStatus    @default(PROSPECT)
+  joinedDate          DateTime?
+  renewalDate         DateTime?
+  riskRating          RiskRating?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  tier                MembershipTier      @relation(fields: [membershipTierId], references: [id])
+  fees                MembershipFee[]
+  agreements          AgreementRecord[]
+  memberAgreements    MembershipAgreement[]
+  groupMemberships    GroupMembership[]
+  sponsorships        SponsorshipRecord[]
+  users               EnterpriseUser[]
+}
+
+model MembershipTier {
+  id               String                @id @default(cuid())
+  name             String                @unique
+  description      String?
+  annualFee        Decimal
+  benefits         Json
+  accessRights     Json
+  votingRight      Boolean               @default(false)
+  projectRight     Boolean               @default(false)
+  maxUsers         Int                   @default(3)
+  members          EnterpriseMember[]
+  memberAgreements MembershipAgreement[]
+  tierBenefits     MembershipTierBenefit[]
+}
+
+model MembershipBenefit {
+  id               String                @id @default(cuid())
+  name             String
+  type             String
+  description      String?
+  usageLimit       Int?
+  approvalRequired Boolean               @default(false)
+  validityDays     Int?
+  status           String                @default("active")
+  createdAt        DateTime              @default(now())
+  tierBenefits     MembershipTierBenefit[]
+  usages           BenefitUsage[]
+}
+
+model MembershipTierBenefit {
+  id        String            @id @default(cuid())
+  tierId    String
+  benefitId String
+  tier      MembershipTier    @relation(fields: [tierId], references: [id])
+  benefit   MembershipBenefit @relation(fields: [benefitId], references: [id])
+  @@unique([tierId, benefitId])
+}
+
+model BenefitUsage {
+  id             String            @id @default(cuid())
+  benefitId      String
+  enterpriseId   String
+  usedByUserId   String
+  usedAt         DateTime          @default(now())
+  relatedEventId String?
+  relatedGroupId String?
+  approvalStatus String            @default("not_required")
+  notes          String?
+  benefit        MembershipBenefit @relation(fields: [benefitId], references: [id])
+}
+
+model MembershipFee {
+  id            String           @id @default(cuid())
+  enterpriseId  String
+  year          Int
+  amountDue     Decimal
+  amountPaid    Decimal          @default(0)
+  invoiceNumber String?
+  dueDate       DateTime
+  paymentDate   DateTime?
+  paymentStatus PaymentStatus    @default(NOT_INVOICED)
+  paymentProof  String?
+  waiverStatus  Boolean          @default(false)
+  waiverReason  String?
+  approvedBy    String?
+  billingCycle  String           @default("annual")
+  currency      String           @default("VND")
+  lateFeeAmount Decimal          @default(0)
+  paymentMethod String?
+  enterprise    EnterpriseMember @relation(fields: [enterpriseId], references: [id])
+
+  @@unique([enterpriseId, year])
+}
+
+model WorkingGroup {
+  id               String                @id @default(cuid())
+  name             String
+  type             GroupType
+  description      String?
+  goal             String
+  ownerId          String
+  visibility       GroupVisibility       @default(PRIVATE_INVITE_ONLY)
+  membershipPolicy GroupMembershipPolicy @default(INVITE_ONLY)
+  status           GroupStatus           @default(ACTIVE)
+  createdAt        DateTime              @default(now())
+  members          GroupMembership[]
+  messages         ChatMessage[]
+  tasks            Task[]
+  decisions        GroupDecision[]
+  meetings         MeetingMinutes[]
+}
+
+model GroupMembership {
+  id           String            @id @default(cuid())
+  groupId      String
+  userId       String
+  enterpriseId String?
+  groupRole    GroupRole         @default(MEMBER)
+  joinedDate   DateTime          @default(now())
+  invitedBy    String?
+  status       GroupMemberStatus @default(ACTIVE)
+  group        WorkingGroup      @relation(fields: [groupId], references: [id])
+  enterprise   EnterpriseMember? @relation(fields: [enterpriseId], references: [id])
+}
+
+model ChatMessage {
+  id          String       @id @default(cuid())
+  groupId     String
+  senderId    String
+  type        MessageType  @default(TEXT)
+  content     String
+  attachments Json?
+  replyToId   String?
+  pinned      Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  editedAt    DateTime?
+  deletedAt   DateTime?
+  group       WorkingGroup @relation(fields: [groupId], references: [id])
+}
+
+model Task {
+  id          String        @id @default(cuid())
+  title       String
+  description String?
+  assignedTo  String?
+  createdBy   String
+  groupId     String?
+  projectId   String?
+  documentId  String?
+  isMilestone Boolean       @default(false)
+  priority    Priority      @default(MEDIUM)
+  dueDate     DateTime?
+  status      TaskStatus    @default(OPEN)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  group       WorkingGroup? @relation(fields: [groupId], references: [id])
+}
+
+model GroupDecision {
+  id          String       @id @default(cuid())
+  groupId     String
+  title       String
+  description String?
+  proposedBy  String
+  approvedBy  String?
+  status      String       @default("proposed")
+  createdAt   DateTime     @default(now())
+  group       WorkingGroup @relation(fields: [groupId], references: [id])
+}
+
+model AgreementRecord {
+  id             String               @id @default(cuid())
+  type           AgreementType
+  title          String
+  partyA         String
+  partyB         String
+  enterpriseId   String?
+  partnerId      String?
+  projectId      String?
+  productId      String?
+  effectiveDate  DateTime?
+  expiryDate     DateTime?
+  status         AgreementStatus      @default(DRAFT)
+  signedFileUrl  String?
+  keyObligations Json?
+  renewalNotice  DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  enterprise     EnterpriseMember?    @relation(fields: [enterpriseId], references: [id])
+  partner        TechnologyPartner?   @relation(fields: [partnerId], references: [id])
+  obligations    AgreementObligation[]
+  clauseChecks   AgreementClauseCheck[]
+}
+
+model AgreementObligation {
+  id                String          @id @default(cuid())
+  agreementId       String
+  title             String
+  description       String?
+  responsibleRole   String?
+  responsibleUserId String?
+  dueDate           DateTime?
+  status            String          @default("open")
+  evidenceUrl       String?
+  completedAt       DateTime?
+  agreement         AgreementRecord @relation(fields: [agreementId], references: [id])
+}
+
+model AgreementClauseCheck {
+  id          String          @id @default(cuid())
+  agreementId String
+  clauseType  String
+  required    Boolean
+  present     Boolean         @default(false)
+  reviewedBy  String?
+  reviewNote  String?
+  agreement   AgreementRecord @relation(fields: [agreementId], references: [id])
+}
+
+model SponsorshipRecord {
+  id           String            @id @default(cuid())
+  enterpriseId String?
+  sponsorName  String
+  type         String
+  amount       Decimal?
+  currency     String            @default("VND")
+  purpose      String?
+  restricted   Boolean           @default(false)
+  projectId    String?
+  agreementId  String?
+  reportingDue DateTime?
+  status       String            @default("committed")
+  createdAt    DateTime          @default(now())
+  enterprise   EnterpriseMember? @relation(fields: [enterpriseId], references: [id])
+}
+
+enum MembershipStatus {
+  PROSPECT
+  INVITED
+  APPLICATION_SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  ACTIVE
+  PAYMENT_OVERDUE
+  SUSPENDED
+  TERMINATED
+  WITHDRAWN
+}
+
+enum PaymentStatus {
+  NOT_INVOICED
+  INVOICED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  WAIVED
+  REFUNDED
+  CANCELLED
+}
+
+enum RiskRating {
+  R1
+  R2
+  R3
+  R4
+  R5
+}
+
+model MembershipAgreement {
+  id            String           @id @default(cuid())
+  enterpriseId  String
+  tierId        String
+  effectiveDate DateTime
+  expiryDate    DateTime?
+  annualFee     Decimal
+  signedFileUrl String?
+  status        String           @default("draft")
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  enterprise    EnterpriseMember @relation(fields: [enterpriseId], references: [id])
+  tier          MembershipTier   @relation(fields: [tierId], references: [id])
+  versions      MembershipAgreementVersion[]
+}
+
+model MembershipAgreementVersion {
+  id          String              @id @default(cuid())
+  agreementId String
+  version     Int
+  status      String
+  changedBy   String
+  changeNote  String?
+  fileUrl     String?
+  createdAt   DateTime            @default(now())
+  agreement   MembershipAgreement @relation(fields: [agreementId], references: [id])
+}
+
+model EnterpriseUser {
+  id           String           @id @default(cuid())
+  enterpriseId String
+  userId       String
+  roleInOrg    String?
+  enterprise   EnterpriseMember @relation(fields: [enterpriseId], references: [id])
+
+  @@unique([enterpriseId, userId])
+}
+
+model MeetingMinutes {
+  id           String       @id @default(cuid())
+  groupId      String
+  meetingDate  DateTime
+  participants Json
+  agenda       String?
+  summary      String?
+  decisions    Json?
+  actionItems  Json?
+  approvedBy   String?
+  status       String       @default("draft")
+  createdAt    DateTime     @default(now())
+  group        WorkingGroup @relation(fields: [groupId], references: [id])
+}
+
+enum GroupType {
+  CORE
+  COUNCIL
+  ENTERPRISE
+  DOMAIN
+  PROJECT
+  PILOT
+  LEGAL
+  DATA
+  SPONSOR
+  COMMUNITY
+  PRIVATE_PARTNER
+}
+
+enum GroupVisibility {
+  PUBLIC_TO_MEMBERS
+  PRIVATE_INVITE_ONLY
+  CORE_ONLY
+  PROJECT_ONLY
+  COUNCIL_ONLY
+  ENTERPRISE_PRIVATE
+}
+
+enum GroupRole {
+  OWNER
+  MODERATOR
+  MEMBER
+  OBSERVER
+  EXTERNAL_EXPERT
+  ENTERPRISE_REP
+}
+
+enum GroupMemberStatus {
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum GroupStatus {
+  ACTIVE
+  ARCHIVED
+  CLOSED
+}
+
+enum MessageType {
+  TEXT
+  FILE
+  LINK
+  SYSTEM_NOTICE
+  TASK_REF
+  DECISION_REF
+  POLL
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  IN_REVIEW
+  DONE
+  CANCELLED
+}
+
+enum AgreementType {
+  MEMBERSHIP
+  MOU
+  NDA
+  DPA
+  SLA
+  TECH_DEPLOYMENT
+  TECH_TRANSFER
+  SPONSORSHIP
+  RESEARCH
+  DATA_SHARING
+  EVENT
+}
+
+enum AgreementStatus {
+  DRAFT
+  LEGAL_REVIEW
+  NEGOTIATION
+  PENDING_SIGNATURE
+  SIGNED
+  ACTIVE
+  EXPIRING
+  EXPIRED
+  TERMINATED
+  ARCHIVED
+}
+
+model TechnologyPartner {
+  id                  String              @id @default(cuid())
+  enterpriseId        String?
+  companyName         String
+  taxCode             String?
+  legalRepresentative String?
+  address             String?
+  technologyDomains   String[]
+  coreProducts        String[]
+  certifications      String[]
+  riskRating          RiskRating?
+  relationshipStatus  String              @default("new")
+  lastReviewDate      DateTime?
+  createdAt           DateTime            @default(now())
+  dueDiligences       DueDiligence[]
+  agreements          AgreementRecord[]
+  products            TechnologyProduct[]
+}
+
+model DueDiligence {
+  id             String            @id @default(cuid())
+  partnerId      String
+  reviewDate     DateTime
+  reviewers      Json
+  legalScore     Int?
+  technicalScore Int?
+  securityScore  Int?
+  dataScore      Int?
+  aiScore        Int?
+  overallScore   Int?
+  riskRating     RiskRating?
+  decision       String?
+  conditions     String?
+  nextReview     DateTime?
+  partner        TechnologyPartner @relation(fields: [partnerId], references: [id])
+}
+
+enum ProductStatus {
+  PROPOSED
+  UNDER_REVIEW
+  APPROVED
+  PILOT_READY
+  DEPLOYED
+  SUSPENDED
+  RETIRED
+}
+
+enum ProjectStatus {
+  PROPOSED
+  PLANNING
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum KPIType {
+  OUTPUT
+  OUTCOME
+  IMPACT
+  SAFETY
+  SATISFACTION
+  INCLUSION
+  SUSTAINABILITY
+}
+
+model TechnologyProduct {
+  id                 String             @id @default(cuid())
+  name               String
+  version            String?
+  type               String
+  description        String?
+  partnerId          String?
+  enterpriseId       String?
+  technologyDomain   String?
+  deploymentModel    String?
+  aiUsed             Boolean            @default(false)
+  riskClassification String?
+  licenseType        String?
+  securityStatus     String             @default("not_reviewed")
+  dataReviewStatus   String             @default("not_reviewed")
+  aiReviewStatus     String             @default("not_reviewed")
+  status             ProductStatus      @default(PROPOSED)
+  createdAt          DateTime           @default(now())
+  partner            TechnologyPartner? @relation(fields: [partnerId], references: [id])
+  pilots             PilotDeployment[]
+}
+
+model Project {
+  id          String            @id @default(cuid())
+  name        String
+  type        String
+  goal        String?
+  targetGroup String?
+  ownerId     String
+  sponsorId   String?
+  groupId     String?
+  status      ProjectStatus     @default(PROPOSED)
+  startDate   DateTime?
+  endDate     DateTime?
+  budget      Decimal?
+  riskLevel   String?
+  createdAt   DateTime          @default(now())
+  pilots      PilotDeployment[]
+  kpis        KPIMetric[]
+}
+
+model PilotDeployment {
+  id               String             @id @default(cuid())
+  projectId        String
+  productId        String?
+  deploymentArea   String
+  beneficiaryGroup String?
+  beneficiaryCount Int?
+  consentStrategy  String?
+  riskAssessment   String?
+  successCriteria  Json?
+  status           String             @default("planning")
+  createdAt        DateTime           @default(now())
+  project          Project            @relation(fields: [projectId], references: [id])
+  product          TechnologyProduct? @relation(fields: [productId], references: [id])
+}
+
+model KPIMetric {
+  id            String    @id @default(cuid())
+  projectId     String
+  type          KPIType
+  name          String
+  unit          String?
+  direction     String    @default("increase_is_good")
+  baselineValue Float?
+  targetValue   Float?
+  currentValue  Float?
+  dataSource    String?
+  frequency     String?
+  responsible   String?
+  lastMeasured  DateTime?
+  evidenceUrl   String?
+  project       Project   @relation(fields: [projectId], references: [id])
+}
+
+enum ConsentStatus {
+  ACTIVE
+  WITHDRAWN
+  EXPIRED
+}
+
+model DataCatalog {
+  id                String          @id @default(cuid())
+  name              String
+  description       String?
+  ownerId           String
+  stewardId         String?
+  confidentiality   Confidentiality @default(INTERNAL)
+  personalDataLevel String          @default("none")
+  riskLevel         String          @default("low")
+  collectionMethod  String?
+  legalBasis        String?
+  retentionPeriod   String?
+  storageLocation   String?
+  encrypted         Boolean         @default(false)
+  projectId         String?
+  productId         String?
+  partnerId         String?
+  createdAt         DateTime        @default(now())
+}
+
+model ConsentRecord {
+  id             String        @id @default(cuid())
+  subjectId      String
+  projectId      String?
+  datasetId      String?
+  purpose        String
+  dataTypes      String[]
+  thirdParty     String?
+  consentMethod  String
+  consentDate    DateTime
+  expiryDate     DateTime?
+  withdrawalDate DateTime?
+  status         ConsentStatus @default(ACTIVE)
+  documentUrl    String?
+}
+
+model DataSubjectRequest {
+  id           String    @id @default(cuid())
+  subjectId    String
+  type         String
+  receivedDate DateTime
+  assignedTo   String?
+  deadline     DateTime?
+  decision     String?
+  actionTaken  String?
+  closedDate   DateTime?
+  status       String    @default("open")
+}
+
+model Event {
+  id            String          @id @default(cuid())
+  name          String
+  type          String
+  description   String?
+  organizerId   String
+  groupId       String?
+  eligibleTiers String[]
+  startTime     DateTime
+  endTime       DateTime?
+  location      String?
+  capacity      Int?
+  registration  Boolean         @default(false)
+  materialsUrl  String?
+  minutesUrl    String?
+  status        String          @default("planned")
+  createdAt     DateTime        @default(now())
+  attendees     EventAttendee[]
+}
+
+model EventAttendee {
+  id      String @id @default(cuid())
+  eventId String
+  userId  String
+  status  String @default("registered")
+  event   Event  @relation(fields: [eventId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String?
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model RetentionRule {
+  id              String  @id @default(cuid())
+  objectType      String  @unique
+  retentionPeriod String
+  legalBasis      String?
+  archiveMethod   String?
+  deletionMethod  String?
+  approvalNeeded  Boolean @default(true)
+}
+
+// --- P0 Audit: GroupMembershipPolicy enum (G-02) ---
+enum GroupMembershipPolicy {
+  OPEN
+  APPROVAL_REQUIRED
+  INVITE_ONLY
+  TIER_RESTRICTED
+  ROLE_RESTRICTED
+}
+
+// --- P0 Audit: PartnerQualification (M-01) ---
+model PartnerQualification {
+  id              String    @id @default(cuid())
+  enterpriseId    String
+  requestedRole   String
+  status          String    @default("requested")
+  dueDiligenceId  String?
+  approvedBy      String?
+  approvedAt      DateTime?
+  conditions      String?
+  createdAt       DateTime  @default(now())
+}
+
+// --- P0 Audit: GroupDocument (G-01) ---
+model GroupDocument {
+  id         String   @id @default(cuid())
+  groupId    String
+  documentId String
+  visibility String   @default("group_members")
+  addedBy    String
+  addedAt    DateTime @default(now())
+  @@unique([groupId, documentId])
+}
+
+// --- P0 Audit: ChatMessageEdit + ChatReadReceipt (G-03) ---
+model ChatMessageEdit {
+  id         String   @id @default(cuid())
+  messageId  String
+  oldContent String
+  editedBy   String
+  editedAt   DateTime @default(now())
+}
+
+model ChatReadReceipt {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+  @@unique([messageId, userId])
+}
+
+// --- P0 Audit: DocumentFile (DMS-01) ---
+model DocumentFile {
+  id            String       @id @default(cuid())
+  documentId    String
+  versionId     String?
+  fileName      String
+  fileType      String
+  fileUrl       String
+  fileHash      String?
+  fileSize      Int?
+  fileRole      String       @default("draft")
+  isOriginal    Boolean      @default(false)
+  isSigned      Boolean      @default(false)
+  signatureType String?
+  uploadedBy    String
+  uploadedAt    DateTime     @default(now())
+  document      DocumentItem @relation(fields: [documentId], references: [id])
+}
+
+// --- P0 Audit: DataProcessingActivity + DataAccessGrant (DATA-01/DATA-02) ---
+model DataProcessingActivity {
+  id                 String    @id @default(cuid())
+  datasetId          String
+  projectId          String?
+  purpose            String
+  legalBasisId       String?
+  processorPartnerId String?
+  processingType     String
+  startDate          DateTime?
+  endDate            DateTime?
+  riskLevel          String    @default("low")
+  dpoApprovalId      String?
+  createdAt          DateTime  @default(now())
+}
+
+model DataAccessGrant {
+  id          String    @id @default(cuid())
+  datasetId   String
+  granteeType String
+  granteeId   String
+  purpose     String
+  approvedBy  String
+  approvedAt  DateTime  @default(now())
+  expiresAt   DateTime?
+  status      String    @default("active")
+}
+
+// --- P0 Audit: PermissionGrant (S-01) ---
+model PermissionGrant {
+  id           String    @id @default(cuid())
+  userId       String
+  roleId       String?
+  permission   String
+  resourceType String
+  resourceId   String?
+  grantedBy    String
+  grantedAt    DateTime  @default(now())
+  expiresAt    DateTime?
+  status       String    @default("active")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P0 ESTABLISHMENT WORKSPACE MODELS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model InstituteProfile {
+  id                    String   @id @default(cuid())
+  nameVi                String
+  nameEn                String?
+  abbreviation          String?
+  instituteType         String
+  founderType           String?
+  registrationAuthority String?
+  plannedAddress        String?
+  plannedFields         String[]
+  headPersonName        String?
+  phone                 String?
+  email                 String?
+  website               String?
+  fax                   String?
+  foundingDate          DateTime?
+  visionStatement       String?
+  missionStatement      String?
+  status                String   @default("planning")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model RegistrationDossier {
+  id                    String   @id @default(cuid())
+  instituteId           String
+  code                  String   @unique
+  registrationAuthority String
+  submissionMethod      String?
+  status                String   @default("preparing")
+  submittedAt           DateTime?
+  receiptNumber         String?
+  receiptFileUrl        String?
+  processingDeadline    DateTime?
+  certificateNumber     String?
+  certificateFileUrl    String?
+  resultDate            DateTime?
+  feeAmount             Decimal?
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  items                 RegistrationDossierItem[]
+}
+
+model RegistrationDossierItem {
+  id               String @id @default(cuid())
+  dossierId        String
+  documentId       String
+  requirementLevel String @default("mandatory_for_submission")
+  itemStatus       String @default("missing")
+  note             String?
+  dossier          RegistrationDossier @relation(fields: [dossierId], references: [id])
+}
+
+model EstablishmentPersonnel {
+  id                String  @id @default(cuid())
+  instituteId       String
+  fullName          String
+  birthYear         Int?
+  gender            String?
+  idNumber          String?
+  qualification     String
+  specialization    String
+  employmentType    String
+  matchingExpertise Boolean @default(false)
+  plannedPosition   String?
+  scientificTitle   String?
+  formType          String?
+  diplomaFileUrl    String?
+  signedFormFileUrl  String?
+  isHeadPerson      Boolean @default(false)
+  currentEmployer   String?
+  yearsExperience   Int?
+  managementExperience String?
+  email             String?
+  status            String  @default("draft")
+  createdAt         DateTime @default(now())
+}
+
+model PremisesRecord {
+  id               String    @id @default(cuid())
+  instituteId      String
+  addressFull      String
+  ownershipType    String
+  legalDocumentType String?
+  contractNumber   String?
+  validFrom        DateTime?
+  validTo          DateTime?
+  areaM2           Float?
+  proofFileUrl     String?
+  ownerName        String?
+  usagePurpose     String?
+  province         String?
+  status           String    @default("draft")
+  createdAt        DateTime  @default(now())
+}
+
+model FacilityAsset {
+  id                       String  @id @default(cuid())
+  instituteId              String
+  assetName                String
+  assetType                String
+  quantity                 Int     @default(1)
+  technicalSpecs           String?
+  ownershipType            String?
+  location                 String?
+  condition                String?
+  relatedRegisteredField   String?
+  proofFileUrl             String?
+  yearAcquired             Int?
+  serialNumber             String?
+  createdAt                DateTime @default(now())
+}
+
+model SubmissionRecord {
+  id                   String    @id @default(cuid())
+  dossierId            String
+  submissionMethod     String
+  submittedBy          String
+  submittedAt          DateTime
+  receivingAuthority   String
+  receiptNumber        String?
+  receiptFileUrl       String?
+  feeAmount            Decimal?
+  processingDeadline   DateTime?
+  currentStatus        String    @default("submitted")
+  authorityFeedback    String?
+  supplementRequired   Boolean   @default(false)
+  supplementDeadline   DateTime?
+  resultStatus         String?
+  certificateNumber    String?
+  certificateFileUrl   String?
+  resultDate           DateTime?
+  createdAt            DateTime  @default(now())
+}

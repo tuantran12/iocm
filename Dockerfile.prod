@@ -1,0 +1,78 @@
+# =============================================================================
+# IOCM Production Dockerfile — Multi-stage build
+# Viện Nghiên cứu Ứng dụng Công nghệ & Đổi mới sáng tạo
+# =============================================================================
+
+# Stage 1: Dependencies — cài đặt dependencies
+FROM node:20-alpine AS deps
+WORKDIR /app
+
+# Cài đặt native build tools cho bcrypt
+RUN apk add --no-cache python3 make g++
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+# =============================================================================
+# Stage 2: Builder — build Next.js production
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# Cài đặt native build tools
+RUN apk add --no-cache python3 make g++
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy prisma schema và generate client
+COPY prisma ./prisma/
+RUN npx prisma generate
+
+# Copy source code
+COPY . .
+
+# Biến môi trường build-time
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+# Build Next.js với standalone output
+RUN npm run build
+
+# =============================================================================
+# Stage 3: Runner — production image tối ưu
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Tạo non-root user cho bảo mật
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copy các file cần thiết từ builder
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+# Copy prisma client và migrations (cho runtime migrations nếu cần)
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/prisma ./prisma
+
+# Copy custom server (Socket.io)
+COPY --from=builder /app/server.ts ./server.ts
+COPY --from=builder /app/node_modules/tsx ./node_modules/tsx
+
+# Đặt quyền cho nextjs user
+RUN chown -R nextjs:nodejs /app
+
+USER nextjs
+
+EXPOSE 3000
+
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# Khởi động server (custom server với Socket.io)
+CMD ["node", "server.js"]

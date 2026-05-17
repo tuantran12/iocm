@@ -1,0 +1,5 @@
+export { DocumentInfoTab } from './DocumentInfoTab'
+export { CompletenessTab } from './CompletenessTab'
+export { VersionsTab } from './VersionsTab'
+export { CommentsTab } from './CommentsTab'
+export { FilesTab } from './FilesTab'
