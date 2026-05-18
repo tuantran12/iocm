@@ -21,8 +21,6 @@ import { vi } from 'date-fns/locale'
 import SaveIcon from '@mui/icons-material/Save'
 import { trpc } from '@/lib/trpc'
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const DOCUMENT_TYPES = [
   { value: 'regulation', label: 'Quy chế' },
   { value: 'policy', label: 'Chính sách' },
@@ -66,8 +64,6 @@ const CONFIDENTIALITY_LEVELS = [
   { value: 'SECRET', label: 'Tuyệt mật' },
 ] as const
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 interface UserOption {
   id: string
   name: string
@@ -90,17 +86,13 @@ interface DocumentFormData {
 }
 
 interface DocumentFormProps {
-  /** If provided, form is in edit mode */
   documentId?: string
-  /** Initial data for edit mode */
   initialData?: Partial<DocumentFormData> & {
     owner?: UserOption | null
     reviewer?: UserOption | null
     approver?: UserOption | null
   }
 }
-
-// ─── Validation ───────────────────────────────────────────────────────────────
 
 interface FormErrors {
   name?: string
@@ -111,26 +103,18 @@ interface FormErrors {
 function validateForm(data: DocumentFormData): FormErrors {
   const errors: FormErrors = {}
 
-  if (!data.name.trim()) {
-    errors.name = 'Tên tài liệu không được để trống'
-  }
-  if (!data.type) {
-    errors.type = 'Vui lòng chọn loại tài liệu'
-  }
-  if (!data.cluster) {
-    errors.cluster = 'Vui lòng chọn nhóm tài liệu'
-  }
+  if (!data.name.trim()) errors.name = 'Tên tài liệu không được để trống'
+  if (!data.type) errors.type = 'Vui lòng chọn loại tài liệu'
+  if (!data.cluster) errors.cluster = 'Vui lòng chọn nhóm tài liệu'
 
   return errors
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
-
 export function DocumentForm({ documentId, initialData }: DocumentFormProps) {
   const router = useRouter()
+  const utils = trpc.useUtils()
   const isEditMode = !!documentId
 
-  // Form state
   const [formData, setFormData] = useState<DocumentFormData>({
     name: initialData?.name ?? '',
     type: initialData?.type ?? '',
@@ -149,55 +133,30 @@ export function DocumentForm({ documentId, initialData }: DocumentFormProps) {
   const [errors, setErrors] = useState<FormErrors>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  // User autocomplete state
-  const [ownerValue, setOwnerValue] = useState<UserOption | null>(
-    initialData?.owner ?? null
-  )
-  const [reviewerValue, setReviewerValue] = useState<UserOption | null>(
-    initialData?.reviewer ?? null
-  )
-  const [approverValue, setApproverValue] = useState<UserOption | null>(
-    initialData?.approver ?? null
-  )
+  const [ownerValue, setOwnerValue] = useState<UserOption | null>(initialData?.owner ?? null)
+  const [reviewerValue, setReviewerValue] = useState<UserOption | null>(initialData?.reviewer ?? null)
+  const [approverValue, setApproverValue] = useState<UserOption | null>(initialData?.approver ?? null)
 
-  // Fetch users for autocomplete
   const { data: users = [], isLoading: usersLoading } = trpc.users.search.useQuery(
     undefined,
     { staleTime: 60_000 }
   )
 
-  // Mutations
-  const createMutation = trpc.documents.create.useMutation({
-    onSuccess: () => {
-      router.push('/documents')
-    },
-    onError: (err) => {
-      setSubmitError(err.message)
-    },
-  })
-
-  const updateMutation = trpc.documents.update.useMutation({
-    onSuccess: () => {
-      router.push(`/documents/${documentId}`)
-    },
-    onError: (err) => {
-      setSubmitError(err.message)
-    },
-  })
-
+  const createMutation = trpc.documents.create.useMutation()
+  const updateMutation = trpc.documents.update.useMutation()
   const isSubmitting = createMutation.isPending || updateMutation.isPending
 
-  // Handlers
   const handleFieldChange = (field: keyof DocumentFormData, value: unknown) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
-    // Clear field error on change
     if (field in errors) {
       setErrors((prev) => ({ ...prev, [field]: undefined }))
     }
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
+
     setSubmitError(null)
 
     const validationErrors = validateForm(formData)
@@ -209,8 +168,8 @@ export function DocumentForm({ documentId, initialData }: DocumentFormProps) {
     const payload = {
       name: formData.name.trim(),
       type: formData.type,
-      cluster: formData.cluster as Parameters<typeof createMutation.mutate>[0]['cluster'],
-      priority: formData.priority as Parameters<typeof createMutation.mutate>[0]['priority'],
+      cluster: formData.cluster as Parameters<typeof createMutation.mutateAsync>[0]['cluster'],
+      priority: formData.priority as Parameters<typeof createMutation.mutateAsync>[0]['priority'],
       confidentiality: formData.confidentiality as 'PUBLIC' | 'INTERNAL' | 'RESTRICTED' | 'CONFIDENTIAL' | 'SECRET',
       deadline: formData.deadline,
       effectiveDate: formData.effectiveDate,
@@ -221,10 +180,22 @@ export function DocumentForm({ documentId, initialData }: DocumentFormProps) {
       approverId: formData.approverId,
     }
 
-    if (isEditMode && documentId) {
-      updateMutation.mutate({ id: documentId, ...payload })
-    } else {
-      createMutation.mutate(payload)
+    try {
+      if (isEditMode && documentId) {
+        await updateMutation.mutateAsync({ id: documentId, ...payload })
+        await Promise.all([
+          utils.documents.get.invalidate({ id: documentId }),
+          utils.documents.list.invalidate(),
+        ])
+        router.push(`/documents/${documentId}`)
+      } else {
+        const created = await createMutation.mutateAsync(payload)
+        await utils.documents.list.invalidate()
+        router.push(`/documents/${created.id}`)
+      }
+      router.refresh()
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Không thể lưu tài liệu. Vui lòng thử lại.')
     }
   }
 
@@ -243,7 +214,6 @@ export function DocumentForm({ documentId, initialData }: DocumentFormProps) {
 
         <Box component="form" onSubmit={handleSubmit} noValidate>
           <Grid container spacing={3}>
-            {/* Tên tài liệu */}
             <Grid size={{ xs: 12 }}>
               <TextField
                 label="Tên tài liệu"
@@ -253,209 +223,66 @@ export function DocumentForm({ documentId, initialData }: DocumentFormProps) {
                 helperText={errors.name}
                 required
                 autoFocus
+                disabled={isSubmitting}
               />
             </Grid>
 
-            {/* Loại tài liệu */}
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                select
-                label="Loại tài liệu"
-                value={formData.type}
-                onChange={(e) => handleFieldChange('type', e.target.value)}
-                error={!!errors.type}
-                helperText={errors.type}
-                required
-              >
-                {DOCUMENT_TYPES.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
+              <TextField select label="Loại tài liệu" value={formData.type} onChange={(e) => handleFieldChange('type', e.target.value)} error={!!errors.type} helperText={errors.type} required disabled={isSubmitting}>
+                {DOCUMENT_TYPES.map((opt) => <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>)}
               </TextField>
             </Grid>
 
-            {/* Nhóm tài liệu */}
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                select
-                label="Nhóm tài liệu"
-                value={formData.cluster}
-                onChange={(e) => handleFieldChange('cluster', e.target.value)}
-                error={!!errors.cluster}
-                helperText={errors.cluster}
-                required
-              >
-                {DOCUMENT_CLUSTERS.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
+              <TextField select label="Nhóm tài liệu" value={formData.cluster} onChange={(e) => handleFieldChange('cluster', e.target.value)} error={!!errors.cluster} helperText={errors.cluster} required disabled={isSubmitting}>
+                {DOCUMENT_CLUSTERS.map((opt) => <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>)}
               </TextField>
             </Grid>
 
-            {/* Mức ưu tiên */}
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                select
-                label="Mức ưu tiên"
-                value={formData.priority}
-                onChange={(e) => handleFieldChange('priority', e.target.value)}
-              >
-                {PRIORITIES.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
+              <TextField select label="Mức ưu tiên" value={formData.priority} onChange={(e) => handleFieldChange('priority', e.target.value)} disabled={isSubmitting}>
+                {PRIORITIES.map((opt) => <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>)}
               </TextField>
             </Grid>
 
-            {/* Mức bảo mật */}
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                select
-                label="Mức bảo mật"
-                value={formData.confidentiality}
-                onChange={(e) => handleFieldChange('confidentiality', e.target.value)}
-              >
-                {CONFIDENTIALITY_LEVELS.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
+              <TextField select label="Mức bảo mật" value={formData.confidentiality} onChange={(e) => handleFieldChange('confidentiality', e.target.value)} disabled={isSubmitting}>
+                {CONFIDENTIALITY_LEVELS.map((opt) => <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>)}
               </TextField>
             </Grid>
 
-            {/* Hạn chót */}
             <Grid size={{ xs: 12, sm: 4 }}>
-              <DatePicker
-                label="Hạn chót"
-                value={formData.deadline}
-                onChange={(date) => handleFieldChange('deadline', date)}
-                slotProps={{
-                  textField: { fullWidth: true, size: 'small' },
-                }}
-              />
+              <DatePicker label="Hạn chót" value={formData.deadline} onChange={(date) => handleFieldChange('deadline', date)} disabled={isSubmitting} slotProps={{ textField: { fullWidth: true, size: 'small' } }} />
             </Grid>
 
-            {/* Ngày hiệu lực */}
             <Grid size={{ xs: 12, sm: 4 }}>
-              <DatePicker
-                label="Ngày hiệu lực"
-                value={formData.effectiveDate}
-                onChange={(date) => handleFieldChange('effectiveDate', date)}
-                slotProps={{
-                  textField: { fullWidth: true, size: 'small' },
-                }}
-              />
+              <DatePicker label="Ngày hiệu lực" value={formData.effectiveDate} onChange={(date) => handleFieldChange('effectiveDate', date)} disabled={isSubmitting} slotProps={{ textField: { fullWidth: true, size: 'small' } }} />
             </Grid>
 
-            {/* Ngày hết hạn */}
             <Grid size={{ xs: 12, sm: 4 }}>
-              <DatePicker
-                label="Ngày hết hạn"
-                value={formData.expiryDate}
-                onChange={(date) => handleFieldChange('expiryDate', date)}
-                slotProps={{
-                  textField: { fullWidth: true, size: 'small' },
-                }}
-              />
+              <DatePicker label="Ngày hết hạn" value={formData.expiryDate} onChange={(date) => handleFieldChange('expiryDate', date)} disabled={isSubmitting} slotProps={{ textField: { fullWidth: true, size: 'small' } }} />
             </Grid>
 
-            {/* Rủi ro nếu thiếu */}
             <Grid size={{ xs: 12 }}>
-              <TextField
-                label="Rủi ro nếu thiếu"
-                value={formData.riskIfMissing}
-                onChange={(e) => handleFieldChange('riskIfMissing', e.target.value)}
-                multiline
-                rows={3}
-                placeholder="Mô tả rủi ro nếu tài liệu này không được hoàn thiện..."
-              />
+              <TextField label="Rủi ro nếu thiếu" value={formData.riskIfMissing} onChange={(e) => handleFieldChange('riskIfMissing', e.target.value)} multiline rows={3} disabled={isSubmitting} placeholder="Mô tả rủi ro nếu tài liệu này không được hoàn thiện..." />
             </Grid>
 
-            {/* Người phụ trách */}
             <Grid size={{ xs: 12, sm: 4 }}>
-              <Autocomplete
-                options={users}
-                value={ownerValue}
-                onChange={(_, newValue) => {
-                  setOwnerValue(newValue)
-                  handleFieldChange('ownerId', newValue?.id ?? null)
-                }}
-                getOptionLabel={(option) => `${option.name} (${option.email})`}
-                isOptionEqualToValue={(option, value) => option.id === value.id}
-                loading={usersLoading}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Người phụ trách"
-                    placeholder="Tìm theo tên hoặc email..."
-                  />
-                )}
-              />
+              <Autocomplete options={users} value={ownerValue} disabled={isSubmitting} onChange={(_, newValue) => { setOwnerValue(newValue); handleFieldChange('ownerId', newValue?.id ?? null) }} getOptionLabel={(option) => `${option.name} (${option.email})`} isOptionEqualToValue={(option, value) => option.id === value.id} loading={usersLoading} renderInput={(params) => <TextField {...params} label="Người phụ trách" placeholder="Tìm theo tên hoặc email..." />} />
             </Grid>
 
-            {/* Người xem xét */}
             <Grid size={{ xs: 12, sm: 4 }}>
-              <Autocomplete
-                options={users}
-                value={reviewerValue}
-                onChange={(_, newValue) => {
-                  setReviewerValue(newValue)
-                  handleFieldChange('reviewerId', newValue?.id ?? null)
-                }}
-                getOptionLabel={(option) => `${option.name} (${option.email})`}
-                isOptionEqualToValue={(option, value) => option.id === value.id}
-                loading={usersLoading}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Người xem xét"
-                    placeholder="Tìm theo tên hoặc email..."
-                  />
-                )}
-              />
+              <Autocomplete options={users} value={reviewerValue} disabled={isSubmitting} onChange={(_, newValue) => { setReviewerValue(newValue); handleFieldChange('reviewerId', newValue?.id ?? null) }} getOptionLabel={(option) => `${option.name} (${option.email})`} isOptionEqualToValue={(option, value) => option.id === value.id} loading={usersLoading} renderInput={(params) => <TextField {...params} label="Người xem xét" placeholder="Tìm theo tên hoặc email..." />} />
             </Grid>
 
-            {/* Người phê duyệt */}
             <Grid size={{ xs: 12, sm: 4 }}>
-              <Autocomplete
-                options={users}
-                value={approverValue}
-                onChange={(_, newValue) => {
-                  setApproverValue(newValue)
-                  handleFieldChange('approverId', newValue?.id ?? null)
-                }}
-                getOptionLabel={(option) => `${option.name} (${option.email})`}
-                isOptionEqualToValue={(option, value) => option.id === value.id}
-                loading={usersLoading}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Người phê duyệt"
-                    placeholder="Tìm theo tên hoặc email..."
-                  />
-                )}
-              />
+              <Autocomplete options={users} value={approverValue} disabled={isSubmitting} onChange={(_, newValue) => { setApproverValue(newValue); handleFieldChange('approverId', newValue?.id ?? null) }} getOptionLabel={(option) => `${option.name} (${option.email})`} isOptionEqualToValue={(option, value) => option.id === value.id} loading={usersLoading} renderInput={(params) => <TextField {...params} label="Người phê duyệt" placeholder="Tìm theo tên hoặc email..." />} />
             </Grid>
 
-            {/* Submit button */}
             <Grid size={{ xs: 12 }}>
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 2 }}>
-                <Button
-                  variant="outlined"
-                  onClick={() => router.back()}
-                  disabled={isSubmitting}
-                >
-                  Hủy
-                </Button>
-                <Button
-                  type="submit"
-                  variant="contained"
-                  startIcon={isSubmitting ? <CircularProgress size={18} /> : <SaveIcon />}
-                  disabled={isSubmitting}
-                >
+                <Button variant="outlined" onClick={() => router.back()} disabled={isSubmitting}>Hủy</Button>
+                <Button type="submit" variant="contained" startIcon={isSubmitting ? <CircularProgress size={18} /> : <SaveIcon />} disabled={isSubmitting}>
                   {isEditMode ? 'Lưu thay đổi' : 'Tạo tài liệu'}
                 </Button>
               </Box>
