@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { db } from "@/lib/db"
 import { authConfig } from "@/lib/auth.config"
+import { verifyTOTP } from "@/lib/totp"
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -12,6 +13,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        totpCode: { label: "Two-factor code", type: "text" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
@@ -20,6 +22,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const email = credentials.email as string
         const password = credentials.password as string
+        const totpCode = credentials.totpCode as string | undefined
 
         const user = await db.user.findUnique({
           where: { email },
@@ -58,7 +61,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null
         }
 
-        // Reset failed logins on success
+        if (user.twoFactor) {
+          if (!user.twoFactorSecret || !totpCode || !verifyTOTP(user.twoFactorSecret, totpCode)) {
+            return null
+          }
+        }
+
+        // Reset failed logins only after the full login flow, including 2FA, succeeds.
         await db.user.update({
           where: { id: user.id },
           data: { failedLogins: 0, lockedUntil: null },
@@ -70,7 +79,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name: user.name,
           roles: user.roles.map((ur) => ur.role.name),
-          twoFactorRequired: user.twoFactor,
+          twoFactorRequired: false,
         }
       },
     }),
