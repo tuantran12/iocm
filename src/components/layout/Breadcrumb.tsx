@@ -7,11 +7,13 @@ import NavigateNextIcon from '@mui/icons-material/NavigateNext'
 import HomeIcon from '@mui/icons-material/Home'
 
 /**
- * Vietnamese labels for route segments.
- * Maps URL path segments to human-readable Vietnamese names.
+ * Vietnamese labels for static route segments.
+ * Dynamic detail routes that need entity names should render their own breadcrumb
+ * inside the page after the entity has been loaded.
  */
 const segmentLabels: Record<string, string> = {
   dashboard: 'Tổng quan',
+  founding: 'Thành lập Viện',
   documents: 'Tài liệu',
   'legal-basis': 'Căn cứ pháp lý',
   members: 'Hội viên',
@@ -25,6 +27,7 @@ const segmentLabels: Record<string, string> = {
   events: 'Sự kiện',
   tasks: 'Công việc',
   audit: 'Kiểm toán',
+  'audit-logs': 'Kiểm toán',
   reports: 'Báo cáo',
   settings: 'Cài đặt',
   notifications: 'Thông báo',
@@ -50,17 +53,27 @@ function getLabel(segment: string): string {
   return segmentLabels[segment] || segment
 }
 
+function shouldHideGenericBreadcrumb(pathname: string): boolean {
+  const segments = pathname.split('/').filter(Boolean)
+
+  // Entity detail pages render their own breadcrumb once data is loaded.
+  // Rendering the generic breadcrumb here would expose raw ids like `cmpawsj...`.
+  if (segments[0] === 'documents' && segments.length >= 2 && segments[1] !== 'new') {
+    return true
+  }
+
+  return false
+}
+
 export function Breadcrumb() {
   const pathname = usePathname()
 
-  // Don't show breadcrumb on dashboard (root)
-  if (pathname === '/dashboard' || pathname === '/') {
+  if (pathname === '/dashboard' || pathname === '/' || shouldHideGenericBreadcrumb(pathname)) {
     return null
   }
 
   const segments = pathname.split('/').filter(Boolean)
 
-  // Build breadcrumb items
   const items = segments.map((segment, index) => {
     const href = '/' + segments.slice(0, index + 1).join('/')
     const isLast = index === segments.length - 1
