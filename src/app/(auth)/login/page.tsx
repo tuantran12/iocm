@@ -38,7 +38,6 @@ export default function LoginPage() {
   const [totpCode, setTotpCode] = useState('')
 
   const loginMutation = trpc.auth.login.useMutation()
-  const verifyTOTPMutation = trpc.auth.verifyLoginTOTP.useMutation()
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -57,7 +56,6 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      // First, validate credentials via tRPC to check if 2FA is required
       const result = await loginMutation.mutateAsync({
         email: email.trim(),
         password,
@@ -69,14 +67,12 @@ export default function LoginPage() {
         return
       }
 
-      // If 2FA is required, show TOTP input
       if ('requiresTwoFactor' in result && result.requiresTwoFactor) {
         setRequires2FA(true)
         setLoading(false)
         return
       }
 
-      // No 2FA — proceed with NextAuth signIn
       await completeSignIn()
     } catch {
       setError('Đã xảy ra lỗi hệ thống. Vui lòng thử lại sau.')
@@ -94,39 +90,27 @@ export default function LoginPage() {
     }
 
     setLoading(true)
-
-    try {
-      const result = await verifyTOTPMutation.mutateAsync({
-        email: email.trim(),
-        token: totpCode,
-      })
-
-      if (!result.success) {
-        setError(result.error ?? 'Mã xác thực không đúng.')
-        setLoading(false)
-        return
-      }
-
-      // TOTP verified — proceed with NextAuth signIn
-      await completeSignIn()
-    } catch {
-      setError('Đã xảy ra lỗi hệ thống. Vui lòng thử lại sau.')
-      setLoading(false)
-    }
+    await completeSignIn(totpCode)
   }
 
-  const completeSignIn = async () => {
+  const completeSignIn = async (totp?: string) => {
     try {
       const result = await signIn('credentials', {
         email: email.trim(),
         password,
+        totpCode: totp,
         redirect: false,
       })
 
       if (result?.error) {
-        setError('Đăng nhập thất bại. Vui lòng thử lại.')
+        setError(
+          requires2FA
+            ? 'Mã xác thực không đúng hoặc đã hết hạn.'
+            : 'Đăng nhập thất bại. Vui lòng thử lại.'
+        )
       } else if (result?.ok) {
         router.push('/founding')
+        router.refresh()
       }
     } catch {
       setError('Đã xảy ra lỗi hệ thống. Vui lòng thử lại sau.')
@@ -154,7 +138,6 @@ export default function LoginPage() {
     >
       <Card sx={{ maxWidth: 420, width: '100%' }}>
         <CardContent sx={{ p: 4 }}>
-          {/* Header */}
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
             <Box
               sx={{
@@ -173,14 +156,8 @@ export default function LoginPage() {
             <Typography variant="h5" component="h1" fontWeight={600}>
               {requires2FA ? 'Xác thực hai yếu tố' : 'Đăng nhập'}
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              {requires2FA
-                ? 'Nhập mã từ ứng dụng xác thực của bạn'
-                : 'Hệ thống Quản trị Viện — IOCM'}
-            </Typography>
           </Box>
 
-          {/* Error Alert */}
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
@@ -188,7 +165,6 @@ export default function LoginPage() {
           )}
 
           {requires2FA ? (
-            /* 2FA TOTP Form */
             <Box component="form" onSubmit={handleTOTPSubmit} noValidate>
               <TextField
                 label="Mã xác thực (6 chữ số)"
@@ -205,7 +181,6 @@ export default function LoginPage() {
                 autoFocus
                 inputProps={{ maxLength: 6, inputMode: 'numeric', pattern: '[0-9]*' }}
                 sx={{ mb: 3 }}
-                helperText="Mở ứng dụng xác thực (Google Authenticator, Authy...) để lấy mã"
               />
 
               <Button
@@ -216,11 +191,7 @@ export default function LoginPage() {
                 disabled={loading || totpCode.length !== 6}
                 sx={{ mb: 2, py: 1.2 }}
               >
-                {loading ? (
-                  <CircularProgress size={24} color="inherit" />
-                ) : (
-                  'Xác nhận'
-                )}
+                {loading ? <CircularProgress size={24} color="inherit" /> : 'Xác nhận'}
               </Button>
 
               <Button
@@ -234,7 +205,6 @@ export default function LoginPage() {
               </Button>
             </Box>
           ) : (
-            /* Login Form */
             <Box component="form" onSubmit={handleSubmit} noValidate>
               <TextField
                 label="Email"
@@ -286,11 +256,7 @@ export default function LoginPage() {
                 disabled={loading}
                 sx={{ mb: 2, py: 1.2 }}
               >
-                {loading ? (
-                  <CircularProgress size={24} color="inherit" />
-                ) : (
-                  'Đăng nhập'
-                )}
+                {loading ? <CircularProgress size={24} color="inherit" /> : 'Đăng nhập'}
               </Button>
 
               <Box sx={{ textAlign: 'center' }}>
