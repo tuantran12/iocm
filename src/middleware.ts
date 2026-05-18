@@ -13,8 +13,16 @@ export default auth((req) => {
   const { nextUrl } = req
   const isLoggedIn = !!req.auth
 
-  // Public paths that don't require authentication
-  const publicPaths = ["/login", "/api/auth", "/forgot-password", "/reset-password"]
+  // Public paths that don't require authentication.
+  // Keep API routes public here so tRPC/auth handlers can return their own
+  // responses instead of being redirected to /login as HTML navigation.
+  const publicPaths = [
+    "/login",
+    "/api/auth",
+    "/api/trpc",
+    "/forgot-password",
+    "/reset-password",
+  ]
   const isPublicPath = publicPaths.some((path) =>
     nextUrl.pathname.startsWith(path)
   )
